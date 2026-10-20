@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101827">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Base Converter">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <title>Data Conversion Calculator</title>
+  <style>
+    :root { color-scheme: dark; --bg:#101827; --panel:#1b2638; --panel2:#243248; --text:#f4f7fb; --muted:#a9b7ca; --accent:#8bceff; --line:#34445c; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:linear-gradient(160deg,#101827,#17263a 70%,#101827); color:var(--text); font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; min-height:100vh; padding:env(safe-area-inset-top) 16px env(safe-area-inset-bottom); }
+    main { max-width:720px; margin:0 auto; padding:22px 0 38px; }
+    header { padding:10px 4px 20px; }
+    h1 { margin:0 0 6px; font-size:clamp(27px,7vw,36px); letter-spacing:-.04em; }
+    .subtitle { color:var(--muted); margin:0; }
+    .panel { background:rgba(27,38,56,.96); border:1px solid var(--line); border-radius:22px; padding:18px; margin:14px 0; box-shadow:0 12px 30px #0002; }
+    label { display:block; font-weight:650; margin:0 0 8px; }
+    select,input,button { width:100%; border-radius:13px; border:1px solid var(--line); background:#111b2a; color:var(--text); font:inherit; padding:14px; }
+    input { font-size:20px; }
+    .fields { display:grid; grid-template-columns:1fr; gap:14px; }
+    button { background:var(--accent); color:#092033; border:0; font-weight:750; margin-top:14px; cursor:pointer; }
+    button:active { transform:scale(.99); }
+    .error { color:#ffb4b4; min-height:1.4em; margin:10px 0 0; }
+    .results { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .result { background:var(--panel2); border:1px solid var(--line); border-radius:15px; padding:13px; min-width:0; }
+    .result .name { color:var(--muted); font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; }
+    .result .value { font-size:clamp(17px,4.4vw,23px); font-weight:750; overflow-wrap:anywhere; margin-top:5px; }
+    h2 { font-size:20px; margin:0 0 12px; }
+    details { background:#111b2a; border:1px solid var(--line); border-radius:14px; margin:10px 0; overflow:hidden; }
+    summary { padding:14px; font-weight:700; cursor:pointer; }
+    .steps { padding:0 14px 14px; color:#d8e4f3; overflow-wrap:anywhere; }
+    .steps p { margin:8px 0; }
+    .steps .answer { color:var(--accent); font-weight:800; border-top:1px solid var(--line); padding-top:10px; }
+    .small { color:var(--muted); font-size:13px; margin:12px 2px 0; }
+    @media (min-width:560px) { .fields { grid-template-columns:1fr 1.5fr; align-items:end; } .results { grid-template-columns:repeat(4,1fr); } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Data Conversion Calculator</h1>
+    <p class="subtitle">Convert decimal, binary, octal, and hexadecimal — with worked solutions.</p>
+  </header>
+
+  <section class="panel" aria-label="Conversion input">
+    <div class="fields">
+      <div>
+        <label for="base">Input number system</label>
+        <select id="base">
+          <option value="10">Decimal (base 10)</option>
+          <option value="2">Binary (base 2)</option>
+          <option value="8">Octal (base 8)</option>
+          <option value="16">Hexadecimal (base 16)</option>
+        </select>
+      </div>
+      <div>
+        <label for="number">Number to convert</label>
+        <input id="number" type="text" inputmode="text" autocapitalize="characters" spellcheck="false" placeholder="e.g. FF, 101101, or 255" autocomplete="off">
+      </div>
+    </div>
+    <button id="convert" type="button">Convert number</button>
+    <p class="error" id="error" role="alert"></p>
+    <p class="small">Use A–F for hexadecimal digits. Do not include a 0x prefix. Negative integers are supported.</p>
+  </section>
+
+  <section class="panel" id="output" hidden>
+    <h2>Final answers</h2>
+    <div class="results" id="results"></div>
+  </section>
+
+  <section class="panel" id="solution" hidden>
+    <h2>Worked solution</h2>
+    <div id="steps"></div>
+  </section>
+</main>
+<script>
+  const baseSelect = document.getElementById("base");
+  const numberInput = document.getElementById("number");
+  const errorBox = document.getElementById("error");
+  const output = document.getElementById("output");
+  const results = document.getElementById("results");
+  const solution = document.getElementById("solution");
+  const steps = document.getElementById("steps");
+
+  const names = {2:"Binary", 8:"Octal", 10:"Decimal", 16:"Hexadecimal"};
+  const digitChar = n => n < 10 ? String(n) : String.fromCharCode(65 + n - 10);
+
+  function parseInteger(text, base) {
+    let s = text.trim().toUpperCase();
+    if (!s) throw new Error("Enter a number first.");
+    let negative = false;
+    if (s[0] === "-" || s[0] === "+") {
+      negative = s[0] === "-";
+      s = s.slice(1);
+    }
+    if (!s) throw new Error("Enter digits after the sign.");
+    let value = 0n;
+    for (const ch of s) {
+      let digit = ch >= "0" && ch <= "9" ? ch.charCodeAt(0)-48 :
+                  ch >= "A" && ch <= "F" ? ch.charCodeAt(0)-55 : -1;
+      if (digit < 0 || digit >= base) {
+        throw new Error(`"${ch}" is not a valid digit in base ${base}.`);
+      }
+      value = value * BigInt(base) + BigInt(digit);
+    }
+    return negative ? -value : value;
+  }
+
+  function toBase(number, base) {
+    if (number === 0n) return "0";
+    const sign = number < 0n ? "-" : "";
+    let n = number < 0n ? -number : number;
+    const b = BigInt(base);
+    let out = "";
+    while (n > 0n) {
+      const rem = Number(n % b);
+      out = digitChar(rem) + out;
+      n = n / b;
+    }
+    return sign + out;
+  }
+
+  function placeValueSolution(text, sourceBase, decimalValue) {
+    let s = text.trim().toUpperCase().replace(/^[+-]/, "");
+    const negative = text.trim().startsWith("-");
+    const lines = [];
+    let sum = 0n;
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      const d = ch >= "0" && ch <= "9" ? ch.charCodeAt(0)-48 : ch.charCodeAt(0)-55;
+      const power = s.length - 1 - i;
+      const term = BigInt(d) * (BigInt(sourceBase) ** BigInt(power));
+      lines.push(`${ch} × ${sourceBase}<sup>${power}</sup> = ${term}`);
+      sum += term;
+    }
+    if (negative) sum = -sum;
+    lines.push(`<strong>Decimal solution = ${sum}</strong>`);
+    return lines;
+  }
+
+  function divisionSolution(number, targetBase) {
+    const lines = [];
+    if (number === 0n) {
+      lines.push(`0 ÷ ${targetBase} = 0 remainder 0`);
+      lines.push(`<p class="answer">Solution: 0</p>`);
+      return lines;
+    }
+    let n = number < 0n ? -number : number;
+    const divisor = BigInt(targetBase);
+    let remainders = "";
+    while (n > 0n) {
+      const quotient = n / divisor;
+      const remainder = Number(n % divisor);
+      lines.push(`${n} ÷ ${targetBase} = ${quotient} remainder ${digitChar(remainder)}`);
+      remainders = digitChar(remainder) + remainders;
+      n = quotient;
+    }
+    if (number < 0n) remainders = "-" + remainders;
+    lines.push("<p>Read the remainders from bottom to top.</p>");
+    lines.push(`<p class="answer">Solution: ${remainders}</p>`);
+    return lines;
+  }
+
+  function render() {
+    errorBox.textContent = "";
+    const raw = numberInput.value;
+    const sourceBase = Number(baseSelect.value);
+    try {
+      const decimal = parseInteger(raw, sourceBase);
+      const clean = raw.trim().toUpperCase();
+      results.innerHTML = "";
+      for (const targetBase of [10, 2, 8, 16]) {
+        const card = document.createElement("div");
+        card.className = "result";
+        const name = document.createElement("div");
+        name.className = "name";
+        name.textContent = names[targetBase];
+        const value = document.createElement("div");
+        value.className = "value";
+        value.textContent = toBase(decimal, targetBase);
+        card.append(name, value);
+        results.append(card);
+      }
+
+      steps.innerHTML = "";
+      const source = document.createElement("details");
+      source.open = true;
+      source.innerHTML = `<summary>Step 1 — Convert ${clean} (base ${sourceBase}) to decimal</summary><div class="steps"></div>`;
+      const sourceSteps = source.querySelector(".steps");
+      for (const line of placeValueSolution(clean, sourceBase, decimal)) {
+        const p = document.createElement("p");
+        p.innerHTML = line;
+        sourceSteps.append(p);
+      }
+      steps.append(source);
+
+      for (const targetBase of [2, 8, 10, 16]) {
+        const detail = document.createElement("details");
+        detail.innerHTML = `<summary>Step ${targetBase === 2 ? 2 : targetBase === 8 ? 3 : targetBase === 10 ? 4 : 5} — Convert decimal to ${names[targetBase]}</summary><div class="steps"></div>`;
+        const inner = detail.querySelector(".steps");
+        if (targetBase === 10) {
+          const p = document.createElement("p");
+          p.innerHTML = `<p class="answer">Decimal solution: ${decimal}</p>`;
+          inner.append(p);
+        } else {
+          for (const line of divisionSolution(decimal, targetBase)) {
+            const p = document.createElement("p");
+            p.innerHTML = line;
+            inner.append(p);
+          }
+        }
+        steps.append(detail);
+      }
+      output.hidden = false;
+      solution.hidden = false;
+    } catch (err) {
+      output.hidden = true;
+      solution.hidden = true;
+      errorBox.textContent = err.message || "Invalid input.";
+    }
+  }
+
+  document.getElementById("convert").addEventListener("click", render);
+  numberInput.addEventListener("keydown", event => {
+    if (event.key === "Enter") render();
+  });
+
+  if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+    window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {}));
+  }
+</script>
+</body>
+</html>
